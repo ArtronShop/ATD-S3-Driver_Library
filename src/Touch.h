@@ -5,6 +5,11 @@
 #include "Common.h"
 
 class GT911 {
+    private:
+        bool readReg(uint16_t reg, uint8_t *data, uint8_t len) ;
+        bool writeReg(uint16_t reg, uint8_t *data, uint8_t len) ;
+        bool writeReg(uint16_t reg, uint8_t data) ;
+
     public: 
         GT911() ;
 

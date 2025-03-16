@@ -13,6 +13,42 @@ static const char * TAG = "Touch";
 
 GT911::GT911() { }
 
+bool GT911::readReg(uint16_t reg, uint8_t *data, uint8_t len) {
+    Wire.beginTransmission(GT911_ADDR);
+    Wire.write(reg >> 8);
+    Wire.write(reg & 0xFF);
+    if (Wire.endTransmission(false) != 0) {
+        ESP_LOGE(TAG, "Write error !");
+        return false;
+    }
+
+    uint8_t count = Wire.requestFrom(GT911_ADDR, len);
+    if (count != len) {
+        ESP_LOGE(TAG, "Read error !");
+        return false;
+    }
+
+    for (uint8_t i = 0; i < len; i++) {
+        data[i] = Wire.read();
+    }
+
+    return true;
+}
+
+bool GT911::writeReg(uint16_t reg, uint8_t *data, uint8_t len) {
+    Wire.beginTransmission(GT911_ADDR);
+    Wire.write(reg >> 8);
+    Wire.write(reg & 0xFF);
+    for (uint8_t i = 0; i < len; i++) {
+        Wire.write(data[i]);
+    }
+    return Wire.endTransmission() == 0;
+}
+
+bool GT911::writeReg(uint16_t reg, uint8_t data) {
+    return this->writeReg(reg, &data, 1);
+}
+
 void GT911::begin() {
     io_ext.pinMode(TOUCH_RST_EXT, OUTPUT);
     io_ext.pinMode(TOUCH_INT_EXT, INPUT);
@@ -26,31 +62,17 @@ void GT911::begin() {
 }
 
 uint8_t GT911::read(uint16_t *cx, uint16_t *cy) {
-    Wire.beginTransmission(GT911_ADDR);
-    Wire.write(0x81);
-    Wire.write(0x4E);
-    if (Wire.endTransmission(false) != 0) {
-        ESP_LOGE(TAG, "Write error !");
-        return 0;
-    }
-
-    uint8_t count;
-    count = Wire.requestFrom(GT911_ADDR, 1);
-    if (count != 1) {
+    uint8_t touch_info;
+    if (!this->readReg(0x814E, &touch_info, 1)) {
         ESP_LOGE(TAG, "Read error !");
         return 0;
     }
 
-    uint8_t touch_info = Wire.read();
     if ((touch_info & 0x80) == 0) { // buffer status are set
         return 0; // not ready and data is not valid
     }
 
-    Wire.beginTransmission(GT911_ADDR);
-    Wire.write(0x81);
-    Wire.write(0x4E);
-    Wire.write(0x00);
-    if (Wire.endTransmission(false) != 0) {
+    if (!this->writeReg(0x814E, 0x00)) {
         ESP_LOGE(TAG, "Write error !");
         return 0;
     }
@@ -61,32 +83,15 @@ uint8_t GT911::read(uint16_t *cx, uint16_t *cy) {
     }
 
     // Read Coordinate
-    Wire.beginTransmission(GT911_ADDR);
-    Wire.write(0x81);
-    Wire.write(0x50);
-    if (Wire.endTransmission(false) != 0) {
-        ESP_LOGE(TAG, "Write error !");
-        return 0;
-    }
-
-    count = Wire.requestFrom(GT911_ADDR, 4);
-    if (count != 4) {
+    uint8_t data[4];
+    if (!this->readReg(0x8150, data, 4)) {
         ESP_LOGE(TAG, "Read error !");
         return 0;
     }
 
     // Process Data
-    uint8_t TOUCH1_XL = Wire.read();
-    uint8_t TOUCH1_XH = Wire.read();
-    uint8_t TOUCH1_YL = Wire.read();
-    uint8_t TOUCH1_YH = Wire.read();
-    /*
-    *cx = (((uint16_t)TOUCH1_XH&0x0F)<<8)|TOUCH1_XL;
-    *cy = (((uint16_t)TOUCH1_YH&0x0F)<<8)|TOUCH1_YL;
-    */
-    
-    uint16_t x = (((uint16_t)TOUCH1_XH&0x0F)<<8)|TOUCH1_XL;
-    uint16_t y = (((uint16_t)TOUCH1_YH&0x0F)<<8)|TOUCH1_YL;
+    uint16_t x = (((uint16_t)data[1]&0x0F)<<8)|data[0];
+    uint16_t y = (((uint16_t)data[3]&0x0F)<<8)|data[2];
 
     uint8_t m = Display.getRotation();
     if (m == 0) {
