@@ -2,6 +2,7 @@
 #include <Wire.h>
 #include "LCD.h"
 #include "Touch.h"
+#include "PCA9557.h"
 
 static const char * TAG = "Touch";
 
@@ -13,6 +14,14 @@ static const char * TAG = "Touch";
 GT911::GT911() { }
 
 void GT911::begin() {
+    io_ext.pinMode(TOUCH_RST_EXT, OUTPUT);
+    io_ext.pinMode(TOUCH_INT_EXT, INPUT);
+
+    io_ext.digitalWrite(TOUCH_RST_EXT, LOW);
+    delay(20);
+    io_ext.digitalWrite(TOUCH_RST_EXT, HIGH);
+    delay(50);
+
     Wire.begin(TOUCH_SDA_PIN, TOUCH_SCL_PIN, (uint32_t) 400E3);
 }
 

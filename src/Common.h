@@ -30,3 +30,5 @@
 #define TFT_DISP_EXT 4
 #define TFT_BL_EXT 5
 
+#define TOUCH_INT_EXT 7
+#define TOUCH_RST_EXT 6
