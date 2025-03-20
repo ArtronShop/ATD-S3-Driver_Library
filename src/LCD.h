@@ -4,6 +4,8 @@
 #include <string.h>
 #include "Common.h"
 
+#include <Arduino_GFX_Library.h>
+
 #include "esp_lcd_panel_rgb.h"
 
 typedef enum {

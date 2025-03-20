@@ -9,7 +9,6 @@ static const char * TAG = "LCD";
 
 const esp_lcd_rgb_timing_t lcd_timing[LCD_SIZE_MAX] = {
 	{ // 800x480
-	  .pclk_hz = 33 * 1000 * 1000,
     .h_res = 800,
     .v_res = 480,
     .hsync_pulse_width = 30,
@@ -18,12 +17,8 @@ const esp_lcd_rgb_timing_t lcd_timing[LCD_SIZE_MAX] = {
     .vsync_pulse_width = 13,
     .vsync_back_porch = 23,
     .vsync_front_porch = 22,
-    .flags = {
-      .pclk_active_neg = 1,
-    },
 	},
   { // 480x272
-    .pclk_hz = 9 * 1000 * 1000,
     .h_res = 480,
     .v_res = 272,
     .hsync_pulse_width = 4,
@@ -32,16 +27,11 @@ const esp_lcd_rgb_timing_t lcd_timing[LCD_SIZE_MAX] = {
     .vsync_pulse_width = 4,
     .vsync_back_porch = 12,
     .vsync_front_porch = 8,
-    .flags = {
-      .pclk_active_neg = 1,
-    },
   }
 };
 
-static esp_lcd_panel_handle_t panel_handle = NULL;
-#ifdef USE_LVGL
-static lv_disp_drv_t disp_drv;
-#endif
+Arduino_ESP32RGBPanel *rgbpanel = NULL;
+Arduino_RGB_Display *gfx = NULL;
 
 static bool notify_lvgl_flush_ready(esp_lcd_panel_handle_t panel, esp_lcd_rgb_panel_event_data_t *edata, void *user_ctx) ;
 
@@ -50,40 +40,23 @@ LCD::LCD() {
 }
 
 void LCD::initRGBInterface(const esp_lcd_rgb_timing_t * timing) {
-  esp_lcd_rgb_panel_config_t panel_config = {
-    .clk_src = LCD_CLK_SRC_DEFAULT,
-    .timings = {},
-    .data_width = 16, // RGB565 in parallel mode, thus 16bit in width
-    .bits_per_pixel = 0,
-    .num_fbs = 1,
-    .bounce_buffer_size_px = 40 * timing->h_res,
-    .sram_trans_align = 8,
-    .psram_trans_align = 64,
-    .hsync_gpio_num = TFT_HSYNC,
-    .vsync_gpio_num = TFT_VSYNC,
-    .de_gpio_num = TFT_DE,
-    .pclk_gpio_num = TFT_PCLK,
-    .disp_gpio_num = -1,
-    .data_gpio_nums = {
-      TFT_B0, TFT_B1, TFT_B2, TFT_B3, TFT_B4,
-      TFT_G0, TFT_G1, TFT_G2, TFT_G3, TFT_G4, TFT_G5,
-      TFT_R0, TFT_R1, TFT_R2, TFT_R3, TFT_R4,
-    },
-    .flags = {
-      .disp_active_low = 0,
-      .refresh_on_demand = 0,
-      .fb_in_psram = 1,
-      .double_fb = 0,
-      .no_fb = 0,
-      .bb_invalidate_cache = 0
-    }
-  };
-  memcpy(&panel_config.timings, timing, sizeof(esp_lcd_rgb_timing_t));
-  esp_lcd_new_rgb_panel(&panel_config, &panel_handle);
+	rgbpanel = new Arduino_ESP32RGBPanel(
+    TFT_DE, TFT_VSYNC, TFT_HSYNC, TFT_PCLK,
+    TFT_R0, TFT_R1, TFT_R2, TFT_R3, TFT_R4,
+    TFT_G0, TFT_G1, TFT_G2, TFT_G3, TFT_G4, TFT_G5,
+    TFT_B0, TFT_B1, TFT_B2, TFT_B3, TFT_B4,
+    0 /* hsync_polarity */, timing->hsync_front_porch, timing->hsync_pulse_width, timing->hsync_back_porch,
+    0 /* vsync_polarity */, timing->vsync_front_porch, timing->vsync_pulse_width, timing->vsync_back_porch
+  );
 
-  ESP_LOGI(TAG, "Initialize RGB LCD panel");
-  esp_lcd_panel_reset(panel_handle);
-  esp_lcd_panel_init(panel_handle);
+  gfx = new Arduino_RGB_Display(
+      this->lcd_width, this->lcd_height,
+      rgbpanel, 0 /* rotation */, true /* auto_flush */
+  );
+
+  if (!gfx->begin()) {
+    ESP_LOGE(TAG, "gfx->begin() failed!");
+  }
 }
 
 void LCD::begin(LCD_Size_t size, int rotation) {
@@ -112,24 +85,7 @@ int LCD::getHeight() {
 }
 
 void LCD::setRotation(int m) {
-  switch(m) {
-    case 1:
-      esp_lcd_panel_mirror(panel_handle, false, false);
-      esp_lcd_panel_swap_xy(panel_handle, false);
-      break;
-    case 2:
-      esp_lcd_panel_mirror(panel_handle, true, false);
-      esp_lcd_panel_swap_xy(panel_handle, true);
-      break;
-    case 3:
-      esp_lcd_panel_mirror(panel_handle, true, true);
-      esp_lcd_panel_swap_xy(panel_handle, false);
-      break;
-    case 4:
-      esp_lcd_panel_mirror(panel_handle, false, true);
-      esp_lcd_panel_swap_xy(panel_handle, true);
-      break;
-  }
+  gfx->setRotation(m - 1);
   this->rotation = m;
 }
 
@@ -154,7 +110,10 @@ void LCD::setWindow(int x_start, int y_start, int x_end, int y_end) {
 }
 
 void LCD::drawBitmap(int x_start, int y_start, int x_end, int y_end, uint16_t* color_data) {
-  esp_lcd_panel_draw_bitmap(panel_handle, x_start, y_start, x_end, y_end, color_data);
+  uint32_t w = (x_end - x_start + 1);
+  uint32_t h = (y_end - y_start + 1);
+  
+  gfx->draw16bitRGBBitmap(x_start, y_start, color_data, w, h);
 }
 
 /*
@@ -497,7 +456,10 @@ static lv_disp_draw_buf_t draw_buf;
 static lv_color_t * disp_draw_buf;
 
 static void disp_flush(lv_disp_drv_t *disp, const lv_area_t *area, lv_color_t *color_p) {
-  esp_lcd_panel_draw_bitmap(panel_handle, area->x1, area->y1, area->x2 + 1, area->y2 + 1, color_p);
+  uint32_t w = (area->x2 - area->x1 + 1);
+  uint32_t h = (area->y2 - area->y1 + 1);
+  
+  gfx->draw16bitRGBBitmap(area->x1, area->y1, (uint16_t *)&color_p->full, w, h);
   lv_disp_flush_ready(disp);
 }
 
@@ -511,12 +473,13 @@ void display_inp_feedback(lv_indev_drv_t *indev_driver, uint8_t event) {
 
 void LCD::useLVGL() {
   lv_init();
-  
+
   uint32_t buffer_size_in_px_cnt = this->lcd_width * this->lcd_height / 10;
   disp_draw_buf = (lv_color_t *)heap_caps_malloc(sizeof(lv_color_t) * buffer_size_in_px_cnt, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
   lv_disp_draw_buf_init(&draw_buf, disp_draw_buf, NULL, buffer_size_in_px_cnt);
 
   /*Initialize the display*/
+  static lv_disp_drv_t disp_drv;
   lv_disp_drv_init(&disp_drv);
   disp_drv.hor_res = this->lcd_width;
   disp_drv.ver_res = this->lcd_height;
@@ -527,13 +490,13 @@ void LCD::useLVGL() {
 }
 
 void LCD::loop() {
-  { // UI update
+  /* { // UI update
     static unsigned long timer = 0;
     if ((millis() < timer) || (timer == 0) || ((millis() - timer) >= 5)) {
-      timer = millis();
+      timer = millis(); */
       lv_timer_handler();
-    }
-  }
+    /*}
+  } */
 
   { // Auto sleep
     static uint8_t state = 0;
