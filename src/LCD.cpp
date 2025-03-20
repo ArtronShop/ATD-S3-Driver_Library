@@ -19,7 +19,7 @@ const esp_lcd_rgb_timing_t lcd_timing[LCD_SIZE_MAX] = {
     .vsync_back_porch = 23,
     .vsync_front_porch = 22,
     .flags = {
-      .pclk_active_neg = true,
+      .pclk_active_neg = 1,
     },
 	},
   { // 480x272
@@ -33,10 +33,15 @@ const esp_lcd_rgb_timing_t lcd_timing[LCD_SIZE_MAX] = {
     .vsync_back_porch = 12,
     .vsync_front_porch = 8,
     .flags = {
-      .pclk_active_neg = true,
+      .pclk_active_neg = 1,
     },
   }
 };
+
+static esp_lcd_panel_handle_t panel_handle = NULL;
+#ifdef USE_LVGL
+static lv_disp_drv_t disp_drv;
+#endif
 
 static bool notify_lvgl_flush_ready(esp_lcd_panel_handle_t panel, esp_lcd_rgb_panel_event_data_t *edata, void *user_ctx) ;
 
@@ -45,35 +50,40 @@ LCD::LCD() {
 }
 
 void LCD::initRGBInterface(const esp_lcd_rgb_timing_t * timing) {
-	esp_lcd_panel_handle_t panel_handle = NULL;
   esp_lcd_rgb_panel_config_t panel_config = {
-    .clk_src = LCD_CLK_SRC_PLL160M,
-    .timings = *timing,
-    .data_width = 16,
-    .sram_trans_align = 0,
+    .clk_src = LCD_CLK_SRC_DEFAULT,
+    .timings = {},
+    .data_width = 16, // RGB565 in parallel mode, thus 16bit in width
+    .bits_per_pixel = 0,
+    .num_fbs = 1,
+    .bounce_buffer_size_px = 40 * timing->h_res,
+    .sram_trans_align = 8,
     .psram_trans_align = 64,
     .hsync_gpio_num = TFT_HSYNC,
     .vsync_gpio_num = TFT_VSYNC,
     .de_gpio_num = TFT_DE,
     .pclk_gpio_num = TFT_PCLK,
-    .data_gpio_nums = {
-      TFT_R0, TFT_R1, TFT_R2, TFT_R3, TFT_R4,
-      TFT_G0, TFT_G1, TFT_G2, TFT_G3, TFT_G4, TFT_G5,
-      TFT_B0, TFT_B1, TFT_B2, TFT_B3, TFT_B4
-    },
     .disp_gpio_num = -1,
-    .on_frame_trans_done = notify_lvgl_flush_ready,
-    .user_ctx = &this->disp_drv,
-    .flags {
+    .data_gpio_nums = {
+      TFT_B0, TFT_B1, TFT_B2, TFT_B3, TFT_B4,
+      TFT_G0, TFT_G1, TFT_G2, TFT_G3, TFT_G4, TFT_G5,
+      TFT_R0, TFT_R1, TFT_R2, TFT_R3, TFT_R4,
+    },
+    .flags = {
       .disp_active_low = 0,
-      .relax_on_idle = 0,
-      .fb_in_psram = 1, // allocate frame buffer in PSRAM
+      .refresh_on_demand = 0,
+      .fb_in_psram = 1,
+      .double_fb = 0,
+      .no_fb = 0,
+      .bb_invalidate_cache = 0
     }
   };
+  memcpy(&panel_config.timings, timing, sizeof(esp_lcd_rgb_timing_t));
+  esp_lcd_new_rgb_panel(&panel_config, &panel_handle);
 
-	esp_lcd_new_rgb_panel(&panel_config, &this->panel_handle);
-	esp_lcd_panel_reset(this->panel_handle);
-	esp_lcd_panel_init(this->panel_handle);
+  ESP_LOGI(TAG, "Initialize RGB LCD panel");
+  esp_lcd_panel_reset(panel_handle);
+  esp_lcd_panel_init(panel_handle);
 }
 
 void LCD::begin(LCD_Size_t size, int rotation) {
@@ -82,6 +92,8 @@ void LCD::begin(LCD_Size_t size, int rotation) {
   const esp_lcd_rgb_timing_t * timing = &lcd_timing[size];
   this->lcd_width = timing->h_res;
   this->lcd_height = timing->v_res;
+
+  Wire.begin(SDA_PIN, SCL_PIN, (uint32_t) 400E3);
 
   io_ext.pinMode(TFT_DISP_EXT, OUTPUT);
   io_ext.pinMode(TFT_BL_EXT, OUTPUT);
@@ -102,20 +114,20 @@ int LCD::getHeight() {
 void LCD::setRotation(int m) {
   switch(m) {
     case 1:
-      esp_lcd_panel_mirror(this->panel_handle, false, false);
-      esp_lcd_panel_swap_xy(this->panel_handle, false);
+      esp_lcd_panel_mirror(panel_handle, false, false);
+      esp_lcd_panel_swap_xy(panel_handle, false);
       break;
     case 2:
-      esp_lcd_panel_mirror(this->panel_handle, true, false);
-      esp_lcd_panel_swap_xy(this->panel_handle, true);
+      esp_lcd_panel_mirror(panel_handle, true, false);
+      esp_lcd_panel_swap_xy(panel_handle, true);
       break;
     case 3:
-      esp_lcd_panel_mirror(this->panel_handle, true, true);
-      esp_lcd_panel_swap_xy(this->panel_handle, false);
+      esp_lcd_panel_mirror(panel_handle, true, true);
+      esp_lcd_panel_swap_xy(panel_handle, false);
       break;
     case 4:
-      esp_lcd_panel_mirror(this->panel_handle, false, true);
-      esp_lcd_panel_swap_xy(this->panel_handle, true);
+      esp_lcd_panel_mirror(panel_handle, false, true);
+      esp_lcd_panel_swap_xy(panel_handle, true);
       break;
   }
   this->rotation = m;
@@ -142,7 +154,7 @@ void LCD::setWindow(int x_start, int y_start, int x_end, int y_end) {
 }
 
 void LCD::drawBitmap(int x_start, int y_start, int x_end, int y_end, uint16_t* color_data) {
-  esp_lcd_panel_draw_bitmap(this->panel_handle, x_start, y_start, x_end, y_end, color_data);
+  esp_lcd_panel_draw_bitmap(panel_handle, x_start, y_start, x_end, y_end, color_data);
 }
 
 /*
@@ -481,21 +493,12 @@ void LCD::fillArrow(uint16_t x0,uint16_t y0,uint16_t x1,uint16_t y1,uint16_t w,u
 #ifdef USE_LVGL
 #include "LVGLHelper.h"
 
-#define BUFFER_SIZE (16000) // 16000 color per time
-
 static lv_disp_draw_buf_t draw_buf;
-static lv_color_t buf[BUFFER_SIZE];
+static lv_color_t * disp_draw_buf;
 
 static void disp_flush(lv_disp_drv_t *disp, const lv_area_t *area, lv_color_t *color_p) {
-  esp_lcd_panel_handle_t panel_handle = (esp_lcd_panel_handle_t) disp->user_data;
   esp_lcd_panel_draw_bitmap(panel_handle, area->x1, area->y1, area->x2 + 1, area->y2 + 1, color_p);
-}
-
-static bool notify_lvgl_flush_ready(esp_lcd_panel_handle_t panel, esp_lcd_rgb_panel_event_data_t *edata, void *user_ctx) {
-  lv_disp_drv_t * disp_drv = (lv_disp_drv_t *) user_ctx;
-  lv_disp_flush_ready(disp_drv);
-  
-  return false;
+  lv_disp_flush_ready(disp);
 }
 
 unsigned long last_touch_on_display  = 0;
@@ -508,17 +511,19 @@ void display_inp_feedback(lv_indev_drv_t *indev_driver, uint8_t event) {
 
 void LCD::useLVGL() {
   lv_init();
-  lv_disp_draw_buf_init(&draw_buf, buf, NULL, BUFFER_SIZE);
+  
+  uint32_t buffer_size_in_px_cnt = this->lcd_width * this->lcd_height / 10;
+  disp_draw_buf = (lv_color_t *)heap_caps_malloc(sizeof(lv_color_t) * buffer_size_in_px_cnt, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+  lv_disp_draw_buf_init(&draw_buf, disp_draw_buf, NULL, buffer_size_in_px_cnt);
 
   /*Initialize the display*/
-  
-  lv_disp_drv_init(&this->disp_drv);
-  this->disp_drv.hor_res = this->lcd_width;
-  this->disp_drv.ver_res = this->lcd_height;
-  this->disp_drv.flush_cb = disp_flush;
-  this->disp_drv.draw_buf = &draw_buf;
-  this->disp_drv.user_data = this->panel_handle;
-  lv_disp_drv_register(&this->disp_drv);
+  lv_disp_drv_init(&disp_drv);
+  disp_drv.hor_res = this->lcd_width;
+  disp_drv.ver_res = this->lcd_height;
+  disp_drv.flush_cb = disp_flush;
+  disp_drv.draw_buf = &draw_buf;
+  disp_drv.user_data = NULL;
+  lv_disp_drv_register(&disp_drv);
 }
 
 void LCD::loop() {

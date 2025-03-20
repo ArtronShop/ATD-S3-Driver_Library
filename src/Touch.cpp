@@ -8,9 +8,6 @@ static const char * TAG = "Touch";
 
 #define GT911_ADDR 0x5D
 
-#define TOUCH_SDA_PIN (8)
-#define TOUCH_SCL_PIN (9)
-
 GT911::GT911() { }
 
 bool GT911::readReg(uint16_t reg, uint8_t *data, uint8_t len) {
@@ -50,6 +47,8 @@ bool GT911::writeReg(uint16_t reg, uint8_t data) {
 }
 
 void GT911::begin() {
+    Wire.begin(SDA_PIN, SCL_PIN, (uint32_t) 400E3);
+
     io_ext.pinMode(TOUCH_RST_EXT, OUTPUT);
     io_ext.pinMode(TOUCH_INT_EXT, INPUT);
 
@@ -57,8 +56,6 @@ void GT911::begin() {
     delay(20);
     io_ext.digitalWrite(TOUCH_RST_EXT, HIGH);
     delay(50);
-
-    Wire.begin(TOUCH_SDA_PIN, TOUCH_SCL_PIN, (uint32_t) 400E3);
 }
 
 uint8_t GT911::read(uint16_t *cx, uint16_t *cy) {
@@ -94,18 +91,21 @@ uint8_t GT911::read(uint16_t *cx, uint16_t *cy) {
     uint16_t y = (((uint16_t)data[3]&0x0F)<<8)|data[2];
 
     uint8_t m = Display.getRotation();
-    if (m == 0) {
+    if (m == 1) {
         *cx = x;
         *cy = y;
-    } else if (m == 1) {
+    } else if (m == 2) {
         *cx = y;
         *cy = Display.getHeight() - x;
-    } else if (m == 2) {
+    } else if (m == 3) {
         *cx = Display.getWidth() - y;
         *cy = x;
-    } else if (m == 3) {
+    } else if (m == 4) {
         *cx = Display.getHeight() - x;
         *cy = Display.getWidth() - y;
+    } else {
+        ESP_LOGE(TAG, "invalid rotation %d", m);
+        return 0;
     }
 
     return touch_point;

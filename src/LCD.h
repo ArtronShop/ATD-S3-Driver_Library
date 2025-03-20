@@ -31,9 +31,6 @@ class LCD {
         uint8_t rotation = 0;
         uint8_t brightness = 100;
 
-        lv_disp_drv_t disp_drv;
-
-        esp_lcd_panel_handle_t panel_handle = NULL;
         void initRGBInterface(const esp_lcd_rgb_timing_t * timing)  ;
         
         void setWindow(int x_start, int y_start, int x_end, int y_end) ;

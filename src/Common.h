@@ -32,3 +32,6 @@
 
 #define TOUCH_INT_EXT 7
 #define TOUCH_RST_EXT 6
+
+#define SDA_PIN (8)
+#define SCL_PIN (9)
